@@ -22,9 +22,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   skips files larger than 2 MiB, caps the number of scanned files, and never
   follows directory symlinks; the size walker is depth-bounded. These prevent
   out-of-memory and runaway-traversal denial of service.
-- **Dependency CVEs:** upgraded `vitest` (dev dependency) to v4, clearing 5
-  moderate transitive advisories in the vite/esbuild chain. `npm audit` now
-  reports 0 vulnerabilities.
+- **Dependency CVEs:** upgraded `vitest` (dev dependency) to v3.2.4, which pulls
+  a patched vite 7 / esbuild, clearing 5 moderate transitive advisories in the
+  vite/esbuild chain. `npm audit` now reports 0 vulnerabilities.
 
 ### Fixed
 

@@ -219,11 +219,14 @@ backtracking. Left as-is; the per-file size cap from #2 bounds worst case anyway
 **dev-only**, in the vitest → vite → vite-node / @vitest/mocker → esbuild chain
 (esbuild dev-server request advisory GHSA-67mh-4wv8-2f99; vite path-traversal
 GHSA-4w7w-66w2-5vf9). These tools never run in production or against analyzed
-projects — they exist only for the test suite — so user risk is nil. The clean
-upgrade was a vitest **major** (`^4.1.7`). Verified the stable
-`vitest` / `vitest/config` imports used by this project are unchanged across the
-major, rebuilt, and re-ran the full suite (37 tests pass). **`npm audit` now
-reports 0 vulnerabilities.** No advisories remain to accept.
+projects — they exist only for the test suite — so user risk is nil. Resolved by
+upgrading vitest to **3.2.4**, which resolves a patched vite 7 / esbuild 0.25
+and clears the entire chain. (vitest 4 / vite 7 dropped Node 18 support — they
+require Node `>=20.19`; depscope's *runtime* still targets Node `>=18`, so the
+CI test job now runs on Node 20/22 while a dedicated `compat` job builds and
+executes the *shipped* CLI under Node 18 to prove the published artifact still
+works on the engines floor.) **`npm audit` now reports 0 vulnerabilities.** No
+advisories remain to accept.
 
 ---
 

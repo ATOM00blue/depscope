@@ -7,6 +7,9 @@ on:
     branches: [main]
 
 jobs:
+  # Full test suite. vitest 3 / vite 7 require Node >= 20.19, so the unit/e2e
+  # tests run on the Node versions the dev toolchain supports. depscope's own
+  # runtime support for Node 18 is proven by the `compat` job below.
   test:
     name: Test (Node ${{ matrix.node }} on ${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -14,7 +17,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-        node: [18, 20, 22]
+        node: [20, 22]
 
     steps:
       - name: Checkout
@@ -39,4 +42,40 @@ jobs:
         run: npm test
 
       - name: Smoke test (built CLI)
+        run: node bin/depscope.js . --no-color
+
+  # Verify the *shipped* tool runs on its minimum supported runtime (Node 18).
+  # The test toolchain (vitest/vite) does not support Node 18, so here we only
+  # build with the dev deps on a newer Node, then execute the built CLI under
+  # Node 18 to prove the published artifact works on the engines floor.
+  compat:
+    name: Node 18 runtime compat (built CLI)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js (build toolchain)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Setup Node.js 18 (runtime under test)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      - name: Smoke test built CLI on Node 18
         run: node bin/depscope.js . --no-color
