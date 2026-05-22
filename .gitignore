@@ -1,0 +1,26 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Test fixtures' installed deps (we commit the manifests, not their installs)
+test/fixtures/**/node_modules/
+
+# Logs & caches
+*.log
+npm-debug.log*
+.npm/
+.vitest/
+coverage/
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# Env
+.env
+.env.local

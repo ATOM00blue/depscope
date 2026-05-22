@@ -1,0 +1,13 @@
+{
+  "name": "sample-project",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A tiny real npm project used for depscope end-to-end smoke tests.",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "is-odd": "^3.0.1",
+    "leftpad": "0.0.1"
+  }
+}
