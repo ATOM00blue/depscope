@@ -1,5 +1,5 @@
-import { readdir, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { readdir, realpath, stat } from "node:fs/promises";
+import { join, sep } from "node:path";
 import type { DepSize, ProjectInfo, SizeResult } from "../types.js";
 import { humanBytes } from "../util/bytes.js";
 
@@ -9,13 +9,39 @@ interface DirStat {
 }
 
 /**
- * Recursively measure the on-disk size and file count of a directory.
- * Pure Node fs — works on Windows (no `du`). Symlinks are not followed to
- * avoid double counting and cycles.
+ * Hard recursion backstop. Real install layouts are nowhere near this deep;
+ * this only guards against adversarial / pathological directory nesting in an
+ * untrusted project (DoS). Symlink cycles are already prevented by skipping
+ * symlinked entries during the walk.
  */
-async function measureDir(dir: string): Promise<DirStat> {
+const MAX_DEPTH = 64;
+
+/** True if `child` is the same path as, or nested inside, `parent`. */
+function isInside(parent: string, child: string): boolean {
+  if (child === parent) return true;
+  const withSep = parent.endsWith(sep) ? parent : parent + sep;
+  return child.startsWith(withSep);
+}
+
+/**
+ * Recursively measure the on-disk size and file count of a directory.
+ * Pure Node fs — works on Windows (no `du`).
+ *
+ * Symlinks are NOT followed during the walk (avoids double counting and
+ * cycles), and the walk is bounded both by `MAX_DEPTH` and by `rootReal`: any
+ * entry whose real path escapes `rootReal` (i.e. a symlink/junction pointing
+ * outside node_modules) is skipped, so a hostile project cannot make depscope
+ * read or measure files outside the analyzed tree.
+ */
+async function measureDir(
+  dir: string,
+  rootReal: string,
+  depth = 0,
+): Promise<DirStat> {
   let bytes = 0;
   let files = 0;
+
+  if (depth > MAX_DEPTH) return { bytes, files };
 
   let entries;
   try {
@@ -27,6 +53,7 @@ async function measureDir(dir: string): Promise<DirStat> {
   const subdirs: string[] = [];
   for (const entry of entries) {
     const full = join(dir, entry.name);
+    // Never follow symlinks discovered during the walk.
     if (entry.isSymbolicLink()) continue;
     if (entry.isDirectory()) {
       subdirs.push(full);
@@ -42,13 +69,38 @@ async function measureDir(dir: string): Promise<DirStat> {
   }
 
   // Measure subdirectories with bounded concurrency.
-  const results = await mapWithConcurrency(subdirs, 8, measureDir);
+  const results = await mapWithConcurrency(subdirs, 8, (d) =>
+    measureDir(d, rootReal, depth + 1),
+  );
   for (const r of results) {
     bytes += r.bytes;
     files += r.files;
   }
 
   return { bytes, files };
+}
+
+/**
+ * Measure a top-level package directory, refusing to follow it if its real
+ * path escapes node_modules. The package dir itself may be a symlink/junction
+ * (npm/pnpm/yarn workspaces use these); we resolve it and bail out if the
+ * target lives outside the analyzed tree.
+ */
+async function measurePackage(
+  dir: string,
+  rootReal: string,
+): Promise<DirStat> {
+  let real: string;
+  try {
+    real = await realpath(dir);
+  } catch {
+    return { bytes: 0, files: 0 };
+  }
+  if (!isInside(rootReal, real)) {
+    // Symlink/junction escaping node_modules — do not traverse outside the tree.
+    return { bytes: 0, files: 0 };
+  }
+  return measureDir(real, rootReal);
 }
 
 /** Run an async mapper over items with a concurrency cap. */
@@ -137,6 +189,16 @@ export async function analyzeSize(
   }
 
   const nodeModules = join(project.root, "node_modules");
+  // Resolve the real path of node_modules once; used to confine the walk so a
+  // hostile project cannot make us measure files outside the analyzed tree via
+  // a symlinked/junctioned package directory.
+  let rootReal: string;
+  try {
+    rootReal = await realpath(nodeModules);
+  } catch {
+    rootReal = nodeModules;
+  }
+
   const installed = await listInstalledPackages(nodeModules);
 
   const declared = new Set([
@@ -146,7 +208,7 @@ export async function analyzeSize(
   ]);
 
   const measured = await mapWithConcurrency(installed, 6, async (pkg) => {
-    const s = await measureDir(pkg.dir);
+    const s = await measurePackage(pkg.dir, rootReal);
     return { name: pkg.name, ...s };
   });
 
@@ -175,7 +237,11 @@ export async function analyzeSize(
   }
 
   directSizes.sort((a, b) => b.bytes - a.bytes);
-  const limited = directSizes.slice(0, top);
+  // Guard against negative/NaN `top`, which would otherwise drop deps via a
+  // negative slice end. Clamp to a non-negative integer.
+  const safeTop =
+    Number.isFinite(top) && top >= 0 ? Math.floor(top) : 10;
+  const limited = directSizes.slice(0, safeTop);
 
   if (transitiveCount > 0) {
     limited.push({

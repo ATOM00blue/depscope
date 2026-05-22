@@ -130,14 +130,17 @@ Examples:
   const spinner = createSpinner(!asJson && process.stderr.isTTY === true);
 
   try {
-    const top = Number.parseInt(opts.top ?? "10", 10);
+    const parsedTop = Number.parseInt(opts.top ?? "10", 10);
+    // Clamp to a sane non-negative integer; a negative `--top` would otherwise
+    // drop the largest deps via a negative slice end.
+    const top = Number.isFinite(parsedTop) && parsedTop >= 0 ? parsedTop : 10;
     spinner.start("Analyzing dependencies…");
 
     const report = await analyze({
       path,
       sections: selectedSections(opts),
       prod: opts.prod,
-      top: Number.isFinite(top) ? top : 10,
+      top,
       onProgress: (m) => spinner.update(m),
     });
 

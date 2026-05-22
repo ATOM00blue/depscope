@@ -6,7 +6,7 @@ import type { AnalyzeOptions, Report, Section } from "./types.js";
 import { resolveProject } from "./util/project.js";
 import { computeHealth } from "./util/score.js";
 
-export const VERSION = "1.0.0";
+export const VERSION = "1.0.1";
 
 export * from "./types.js";
 export { renderTable } from "./report/table.js";

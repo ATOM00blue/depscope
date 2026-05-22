@@ -11,6 +11,28 @@ interface RawManifest {
   optionalDependencies?: Record<string, string>;
 }
 
+/** True for a non-null, non-array plain object. */
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return (
+    typeof value === "object" && value !== null && !Array.isArray(value)
+  );
+}
+
+/**
+ * Coerce an arbitrary value into a `Record<string, string>`. A malformed
+ * manifest may have e.g. `"dependencies": "lodash"` or `null`; rather than
+ * crashing or fabricating index-keyed garbage, we return `{}` for anything that
+ * is not a plain object, and keep only string-valued entries.
+ */
+function asStringRecord(value: unknown): Record<string, string> {
+  if (!isPlainObject(value)) return {};
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(value)) {
+    if (typeof v === "string") out[k] = v;
+  }
+  return out;
+}
+
 /**
  * Find the nearest package.json starting at `startPath` and walking up.
  * If `startPath` is a file, its directory is used.
@@ -34,25 +56,32 @@ export function findProjectRoot(startPath: string): string | null {
 /** Load and normalize project info from a root directory. */
 export function loadProject(root: string): ProjectInfo {
   const manifestPath = join(root, "package.json");
-  let raw: RawManifest;
+  let parsed: unknown;
   try {
-    raw = JSON.parse(readFileSync(manifestPath, "utf8")) as RawManifest;
+    parsed = JSON.parse(readFileSync(manifestPath, "utf8"));
   } catch (err) {
     throw new Error(
       `Could not read package.json at ${manifestPath}: ${(err as Error).message}`,
     );
   }
 
+  // A malformed manifest (array / string / null / number) is treated as an
+  // empty object so analysis degrades gracefully instead of crashing or
+  // producing garbage dependency names.
+  const raw: RawManifest = isPlainObject(parsed)
+    ? (parsed as RawManifest)
+    : {};
+
   return {
     root,
     manifestPath,
-    name: raw.name ?? "(unnamed)",
-    version: raw.version ?? "0.0.0",
-    dependencies: raw.dependencies ?? {},
-    devDependencies: raw.devDependencies ?? {},
+    name: typeof raw.name === "string" ? raw.name : "(unnamed)",
+    version: typeof raw.version === "string" ? raw.version : "0.0.0",
+    dependencies: asStringRecord(raw.dependencies),
+    devDependencies: asStringRecord(raw.devDependencies),
     otherDependencies: {
-      ...(raw.peerDependencies ?? {}),
-      ...(raw.optionalDependencies ?? {}),
+      ...asStringRecord(raw.peerDependencies),
+      ...asStringRecord(raw.optionalDependencies),
     },
     hasNodeModules: existsSync(join(root, "node_modules")),
   };

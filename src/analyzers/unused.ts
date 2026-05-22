@@ -1,7 +1,16 @@
-import { readFile, readdir } from "node:fs/promises";
+import { readFile, readdir, stat } from "node:fs/promises";
 import { builtinModules } from "node:module";
 import { extname, join } from "node:path";
 import type { ProjectInfo, UnusedResult } from "../types.js";
+
+/**
+ * Resource bounds against hostile/huge projects. Real source files are tiny;
+ * skipping multi-MB "source" files prevents an OOM from a malicious blob, and
+ * capping the file count bounds work on pathologically large trees.
+ */
+const MAX_FILE_BYTES = 2 * 1024 * 1024; // 2 MiB
+const MAX_FILES = 50_000;
+const MAX_SCAN_DEPTH = 12;
 
 const SOURCE_EXTS = new Set([
   ".js",
@@ -136,7 +145,8 @@ async function collectSourceFiles(
   acc: string[],
   depth = 0,
 ): Promise<void> {
-  if (depth > 12) return;
+  if (depth > MAX_SCAN_DEPTH) return;
+  if (acc.length >= MAX_FILES) return;
   let entries;
   try {
     entries = await readdir(dir, { withFileTypes: true });
@@ -144,9 +154,10 @@ async function collectSourceFiles(
     return;
   }
   for (const entry of entries) {
-    if (entry.name.startsWith(".") && entry.name !== ".") {
-      // allow dotfiles? skip hidden dirs but include common config files below
-    }
+    if (acc.length >= MAX_FILES) return;
+    // Never follow directory symlinks/junctions — avoids cycles and escaping
+    // the analyzed tree. (readdir withFileTypes reports junctions as symlinks.)
+    if (entry.isSymbolicLink()) continue;
     const full = join(dir, entry.name);
     if (entry.isDirectory()) {
       if (IGNORE_DIRS.has(entry.name)) continue;
@@ -195,6 +206,10 @@ export async function analyzeUnused(
       while (idx < files.length) {
         const file = files[idx++]!;
         try {
+          // Skip oversized files — real source is tiny; this bounds memory
+          // against an adversarial multi-MB blob.
+          const st = await stat(file);
+          if (st.size > MAX_FILE_BYTES) continue;
           const content = await readFile(file, "utf8");
           for (const pkg of extractImports(content)) imported.add(pkg);
         } catch {

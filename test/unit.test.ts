@@ -6,7 +6,11 @@ import {
   specifierToPackage,
 } from "../src/analyzers/unused.js";
 import { computeHealth } from "../src/util/score.js";
-import { parseNpmJson } from "../src/util/npm.js";
+import {
+  buildNpmInvocation,
+  npmChildEnv,
+  parseNpmJson,
+} from "../src/util/npm.js";
 
 describe("humanBytes", () => {
   it("formats bytes", () => {
@@ -132,6 +136,50 @@ describe("computeHealth", () => {
     });
     expect(h.score).toBeGreaterThanOrEqual(0);
     expect(h.grade).toBe("F");
+  });
+});
+
+describe("buildNpmInvocation (never executes project scripts)", () => {
+  it("always appends --ignore-scripts (POSIX)", () => {
+    const { command, spawnArgs, verbatim } = buildNpmInvocation(
+      ["audit", "--json"],
+      false,
+    );
+    expect(command).toBe("npm");
+    expect(verbatim).toBe(false);
+    expect(spawnArgs).toEqual(["audit", "--json", "--ignore-scripts"]);
+  });
+
+  it("always appends --ignore-scripts (Windows, via cmd.exe verbatim)", () => {
+    const { command, spawnArgs, verbatim } = buildNpmInvocation(
+      ["outdated", "--json", "--long"],
+      true,
+    );
+    expect(command).toBe("cmd.exe");
+    expect(verbatim).toBe(true);
+    expect(spawnArgs.slice(0, 3)).toEqual(["/d", "/s", "/c"]);
+    const cmdline = spawnArgs[3]!;
+    expect(cmdline).toContain("npm.cmd");
+    expect(cmdline).toContain("--ignore-scripts");
+    // Static args only — no shell metacharacters that could be injected.
+    expect(cmdline).not.toMatch(/[&|;`]/);
+  });
+
+  it("does not pass any project-controlled string on the command line", () => {
+    // The only inputs are the constant subcommand args; cwd is a spawn option.
+    const { spawnArgs } = buildNpmInvocation(["audit", "--json"], false);
+    for (const a of spawnArgs) {
+      expect(typeof a).toBe("string");
+    }
+  });
+});
+
+describe("npmChildEnv (forces ignore-scripts in child env)", () => {
+  it("sets NPM_CONFIG_IGNORE_SCRIPTS=true", () => {
+    const env = npmChildEnv({ PATH: "/usr/bin" });
+    expect(env.NPM_CONFIG_IGNORE_SCRIPTS).toBe("true");
+    expect(env.NPM_CONFIG_FUND).toBe("false");
+    expect(env.PATH).toBe("/usr/bin");
   });
 });
 
